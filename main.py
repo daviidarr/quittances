@@ -90,15 +90,15 @@ twenty_fifth_this_month = today.replace(day=25).strftime(date_format)
 
 # Define replacements
 replacements = {
-    "Raj Kumar Saha": tenantname,
-    "sept cent trente": "sept cent trente",
-    "730": str(rent_amt),
-    "01 / 01 / 2024": first_day_this_month,
-    "01 / 02 / 2024": first_day_next_month,
-    "650": str(hors_charge),
-    "80": str(charge),
-    "14 / 01 / 2024": thirteenth_this_month,
-    "14 / 01 / 2024": twenty_fifth_this_month
+    "{tenantname}": tenantname,
+    "{rent_letters}": "sept cent trente euros",
+    "{rent_amt}": str(rent_amt) + "€",
+    "{start}": first_day_this_month,
+    "{end}": first_day_next_month,
+    "{ex_charge}": str(hors_charge) + "€",
+    "{charge}": str(charge) + "€",
+    "{recu}": thirteenth_this_month,
+    "{signed}": twenty_fifth_this_month
 }
 
 # Replace text in the Word document
@@ -114,6 +114,7 @@ print(f"Word document has been updated and saved as {output_doc}")
 # Convert to PDF
 convert_to_pdf(output_doc, output_pdf)
 print(f"PDF has been created as {output_pdf}")
+os.remove(output_doc)
 
 if send_flag := False:
     sender_email = "your_email@gmail.com"  # Replace with your Gmail address
