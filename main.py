@@ -1,3 +1,5 @@
+import configparser
+
 from docx import Document as DocxDocument
 from datetime import datetime, timedelta
 import os
@@ -75,14 +77,22 @@ def send_email(sender_email, sender_password, receiver_email, subject, body, att
     server.quit()
 
 # Define your variables
-tenantname = "Raj Kumar Saha"
-hors_charge = 650
-charge = 80
-rent_amt = hors_charge + charge
+ini_file = configparser.ConfigParser(interpolation=None)
+ini_file.read(os.path.join(os.sep, os.getcwd(), 'config.ini'))
+sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
+sender_password = dict(ini_file.items(section="gmail"))["sender_password"]
+tenantname = dict(ini_file.items(section="property"))["tenantname"]
+landlordname = dict(ini_file.items(section="property"))["landlordname"]
+hors_charge = dict(ini_file.items(section="property"))["hors_charge"]
+charge = dict(ini_file.items(section="property"))["charge"]
+total_litteral = dict(ini_file.items(section="property"))["total_litteral"]
+
+rent_amt = int(hors_charge) + int(charge)
 date_format = "%d-%m-%Y"
+months_offset = 1
 
 # Calculate dates
-today = datetime.today()
+today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
 first_day_this_month = today.replace(day=1).strftime(date_format)
 first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
 thirteenth_this_month = today.replace(day=13).strftime(date_format)
@@ -91,7 +101,7 @@ twenty_fifth_this_month = today.replace(day=25).strftime(date_format)
 # Define replacements
 replacements = {
     "{tenantname}": tenantname,
-    "{rent_letters}": "sept cent trente euros",
+    "{rent_letters}":total_litteral,
     "{rent_amt}": str(rent_amt) + "€",
     "{start}": first_day_this_month,
     "{end}": first_day_next_month,
@@ -116,12 +126,10 @@ convert_to_pdf(output_doc, output_pdf)
 print(f"PDF has been created as {output_pdf}")
 os.remove(output_doc)
 
-if send_flag := False:
-    sender_email = "your_email@gmail.com"  # Replace with your Gmail address
-    sender_password = "your_app_password"  # Replace with your app password
-    receiver_email = "thetenant@gmail.com"
-    subject = f"Rent Receipt for {first_day_this_month} to {first_day_next_month}"
-    body = f"Dear {tenantname},\n\nPlease find attached the rent receipt for the period {first_day_this_month} to {first_day_next_month}.\n\nBest regards,\nYour Landlord"
+if send_flag := True:
+    receiver_email = "davidrelkin@gmail.com"
+    subject = f"Quittance de loyer du {first_day_this_month} au {first_day_next_month}"
+    body = f"Cher {tenantname},\n\nVeuillez trouver ci-joint votre quittance de loyer du {first_day_this_month} au {first_day_next_month}.\n\nMerci,\n{landlordname}"
 
     send_email(sender_email, sender_password, receiver_email, subject, body, output_pdf)
     print("Email sent successfully")
