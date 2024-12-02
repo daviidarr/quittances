@@ -1,4 +1,5 @@
 import configparser
+from os import PathLike
 
 from docx import Document as DocxDocument
 from datetime import datetime, timedelta
@@ -50,6 +51,51 @@ def convert_to_pdf(docx_path, pdf_path):
     os.rename(os.path.splitext(docx_path)[0] + '.pdf', pdf_path)
 
 
+def make_quittance(property_dict: dict) -> str:
+    address = dict(property_dict)["address"]
+    tenantname = dict(property_dict)["tenantname"]
+    landlordname = dict(property_dict)["landlordname"]
+    hors_charge = dict(property_dict)["hors_charge"]
+    charge = dict(property_dict)["charge"]
+    total_litteral = dict(property_dict)["total_litteral"]
+    rent_amt = int(hors_charge) + int(charge)
+    date_format = "%d-%m-%Y"
+
+    # Calculate dates
+    months_offset = 1
+    today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
+    first_day_this_month = today.replace(day=1).strftime(date_format)
+    first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
+    thirteenth_this_month = today.replace(day=13).strftime(date_format)
+    twenty_fifth_this_month = today.replace(day=25).strftime(date_format)
+
+    # Define replacements
+    replacements = {
+        "{address}": address,
+        "{tenantname}": tenantname,
+        "{rent_letters}": total_litteral,
+        "{rent_amt}": str(rent_amt) + "€",
+        "{start}": first_day_this_month,
+        "{end}": first_day_next_month,
+        "{ex_charge}": str(hors_charge) + "€",
+        "{charge}": str(charge) + "€",
+        "{recu}": thirteenth_this_month,
+        "{signed}": twenty_fifth_this_month
+    }
+    output_doc = f'{property_name}_quittance_{today.strftime(date_format)}.docx'
+    output_pdf = f'{property_name}_quittance_{today.strftime(date_format)}.pdf'
+    modified_doc = replace_text_in_docx(input_doc, replacements)
+    modified_doc.save(output_doc)
+    print(f"Word document has been updated and saved as {output_doc}")
+    # Convert to PDF
+    convert_to_pdf(output_doc, output_pdf)
+    print(f"PDF has been created as {output_pdf}")
+    os.remove(output_doc)
+
+    msg_body = f"Cher {tenantname},\n\nVeuillez trouver ci-joint votre quittance de loyer du {first_day_this_month} au {first_day_next_month}.\n\nMerci,\n{landlordname}"
+
+    return msg_body, output_pdf
+
 def send_email(sender_email, sender_password, receiver_email, subject, body, attachment_path):
     msg = MIMEMultipart()
     msg['From'] = sender_email
@@ -76,60 +122,25 @@ def send_email(sender_email, sender_password, receiver_email, subject, body, att
     server.sendmail(sender_email, receiver_email, text)
     server.quit()
 
-# Define your variables
-ini_file = configparser.ConfigParser(interpolation=None)
-ini_file.read(os.path.join(os.sep, os.getcwd(), 'config.ini'))
-sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
-sender_password = dict(ini_file.items(section="gmail"))["sender_password"]
-tenantname = dict(ini_file.items(section="property"))["tenantname"]
-landlordname = dict(ini_file.items(section="property"))["landlordname"]
-hors_charge = dict(ini_file.items(section="property"))["hors_charge"]
-charge = dict(ini_file.items(section="property"))["charge"]
-total_litteral = dict(ini_file.items(section="property"))["total_litteral"]
 
-rent_amt = int(hors_charge) + int(charge)
-date_format = "%d-%m-%Y"
-months_offset = 1
+if __name__ == "__main__":
+    # Define your variables
+    input_doc = "quittance_template.docx"
+    ini_file = configparser.ConfigParser(interpolation=None)
+    ini_file.read(os.path.join(os.sep, os.getcwd(), 'config.ini'))
+    properties_list = ini_file.sections()
 
-# Calculate dates
-today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
-first_day_this_month = today.replace(day=1).strftime(date_format)
-first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
-thirteenth_this_month = today.replace(day=13).strftime(date_format)
-twenty_fifth_this_month = today.replace(day=25).strftime(date_format)
+    # auth
+    sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
+    sender_password = dict(ini_file.items(section="gmail"))["sender_password"]
+    properties_list.pop(properties_list.index("gmail"))
 
-# Define replacements
-replacements = {
-    "{tenantname}": tenantname,
-    "{rent_letters}":total_litteral,
-    "{rent_amt}": str(rent_amt) + "€",
-    "{start}": first_day_this_month,
-    "{end}": first_day_next_month,
-    "{ex_charge}": str(hors_charge) + "€",
-    "{charge}": str(charge) + "€",
-    "{recu}": thirteenth_this_month,
-    "{signed}": twenty_fifth_this_month
-}
+    for property_name in properties_list:
+        property_dict = dict(ini_file.items(section=property_name))
+        msg_body, output_pdf = make_quittance(property_dict)
 
-# Replace text in the Word document
-input_doc = "quittance_template.docx"
-output_doc = f'filled_quittance_{today.strftime(date_format)}.docx'
-output_pdf = f'filled_quittance_{today.strftime(date_format)}.pdf'
+        receiver_email = property_dict['tenant_email']
+        subject = f"Quittance de loyer {property_name}"
 
-modified_doc = replace_text_in_docx(input_doc, replacements)
-modified_doc.save(output_doc)
-
-print(f"Word document has been updated and saved as {output_doc}")
-
-# Convert to PDF
-convert_to_pdf(output_doc, output_pdf)
-print(f"PDF has been created as {output_pdf}")
-os.remove(output_doc)
-
-if send_flag := True:
-    receiver_email = "davidrelkin@gmail.com"
-    subject = f"Quittance de loyer du {first_day_this_month} au {first_day_next_month}"
-    body = f"Cher {tenantname},\n\nVeuillez trouver ci-joint votre quittance de loyer du {first_day_this_month} au {first_day_next_month}.\n\nMerci,\n{landlordname}"
-
-    send_email(sender_email, sender_password, receiver_email, subject, body, output_pdf)
-    print("Email sent successfully")
+        send_email(sender_email, sender_password, receiver_email, subject, msg_body, output_pdf)
+        print("Email sent successfully")
