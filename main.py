@@ -1,4 +1,5 @@
 import configparser
+import sys
 from os import PathLike
 
 from docx import Document as DocxDocument
@@ -96,51 +97,125 @@ def make_quittance(property_dict: dict) -> str:
 
     return msg_body, output_pdf
 
+def validate_email_params(sender_email, sender_password, receiver_email):
+    """Validate email parameters before sending."""
+    if not all([sender_email, sender_password, receiver_email]):
+        raise ValueError("Missing required email parameters")
+    if '@' not in sender_email or '@' not in receiver_email:
+        raise ValueError("Invalid email format")
+
 def send_email(sender_email, sender_password, receiver_email, subject, body, attachment_path):
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = subject
+    """Send email with improved error handling and validation."""
+    try:
+        validate_email_params(sender_email, sender_password, receiver_email)
+        
+        if not os.path.exists(attachment_path):
+            raise FileNotFoundError(f"Attachment file not found: {attachment_path}")
 
-    msg.attach(MIMEText(body, 'plain'))
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = subject
 
-    with open(attachment_path, "rb") as attachment:
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(attachment.read())
+        msg.attach(MIMEText(body, 'plain'))
 
-    encoders.encode_base64(part)
-    part.add_header(
-        "Content-Disposition",
-        f"attachment; filename= {os.path.basename(attachment_path)}",
-    )
-    msg.attach(part)
+        # Handle attachment
+        with open(attachment_path, "rb") as attachment:
+            part = MIMEBase("application", "pdf")  # Specify PDF type
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f"attachment; filename= {os.path.basename(attachment_path)}",
+            )
+            msg.attach(part)
 
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.starttls()
-    server.login(sender_email, sender_password)
-    text = msg.as_string()
-    server.sendmail(sender_email, receiver_email, text)
-    server.quit()
+        # Connect to SMTP server with proper error handling
+        server = None
+        try:
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            text = msg.as_string()
+            server.sendmail(sender_email, receiver_email, text)
+        finally:
+            if server:
+                server.quit()
 
+        # Clean up the PDF file after successful sending
+        os.remove(attachment_path)
+        return True
+
+    except smtplib.SMTPAuthenticationError:
+        raise Exception("Failed to authenticate with Gmail. Please check your credentials and ensure you're using an App Password.")
+    except smtplib.SMTPException as e:
+        raise Exception(f"SMTP error occurred: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Failed to send email: {str(e)}")
+
+
+def validate_config(config):
+    """Validate the configuration file."""
+    if 'gmail' not in config.sections():
+        raise ValueError("Missing 'gmail' section in config file")
+    
+    gmail_config = dict(config.items('gmail'))
+    if not gmail_config.get('sender_email') or not gmail_config.get('sender_password'):
+        raise ValueError("Missing email credentials in config file")
+
+    properties = [s for s in config.sections() if s != 'gmail']
+    if not properties:
+        raise ValueError("No property sections found in config file")
+
+    required_fields = ['address', 'tenantname', 'tenant_email', 'landlordname', 'hors_charge', 'charge', 'total_litteral']
+    for prop in properties:
+        prop_dict = dict(config.items(prop))
+        missing = [f for f in required_fields if not prop_dict.get(f)]
+        if missing:
+            raise ValueError(f"Missing required fields {missing} in property section {prop}")
+
+def main():
+    """Main function with improved error handling."""
+    try:
+        input_doc = "quittance_template.docx"
+        if not os.path.exists(input_doc):
+            raise FileNotFoundError(f"Template file not found: {input_doc}")
+
+        config_path = os.path.join(os.sep, os.getcwd(), 'config.ini')
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+
+        ini_file = configparser.ConfigParser(interpolation=None)
+        ini_file.read(config_path)
+        
+        # Validate config file
+        validate_config(ini_file)
+
+        # Get email credentials
+        sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
+        sender_password = dict(ini_file.items(section="gmail"))["sender_password"]
+        
+        # Process each property
+        properties_list = [s for s in ini_file.sections() if s != 'gmail']
+        for property_name in properties_list:
+            try:
+                property_dict = dict(ini_file.items(section=property_name))
+                msg_body, output_pdf = make_quittance(property_dict)
+
+                receiver_email = property_dict['tenant_email']
+                subject = f"Quittance de loyer {property_name}"
+
+                if send_email(sender_email, sender_password, receiver_email, subject, msg_body, output_pdf):
+                    print(f"Email sent successfully for property: {property_name}")
+            except Exception as e:
+                print(f"Failed to process property {property_name}: {str(e)}")
+                # Continue with next property even if one fails
+                continue
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    # Define your variables
-    input_doc = "quittance_template.docx"
-    ini_file = configparser.ConfigParser(interpolation=None)
-    ini_file.read(os.path.join(os.sep, os.getcwd(), 'config.ini'))
-    properties_list = ini_file.sections()
-
-    # auth
-    sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
-    sender_password = dict(ini_file.items(section="gmail"))["sender_password"]
-    properties_list.pop(properties_list.index("gmail"))
-
-    for property_name in properties_list:
-        property_dict = dict(ini_file.items(section=property_name))
-        msg_body, output_pdf = make_quittance(property_dict)
-
-        receiver_email = property_dict['tenant_email']
-        subject = f"Quittance de loyer {property_name}"
-
-        send_email(sender_email, sender_password, receiver_email, subject, msg_body, output_pdf)
-        print("Email sent successfully")
+    import sys
+    main()
