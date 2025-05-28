@@ -5,11 +5,17 @@ from docx import Document as DocxDocument
 from datetime import datetime, timedelta
 import os
 import subprocess
-import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+import pickle
+import json
+import base64
 
 
 def replace_text_in_docx(doc_path, replacements):
@@ -62,12 +68,12 @@ def make_quittance(property_dict: dict) -> str:
     date_format = "%d-%m-%Y"
 
     # Calculate dates
-    months_offset = 1
+    months_offset = 0
     today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
     first_day_this_month = today.replace(day=1).strftime(date_format)
     first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
-    thirteenth_this_month = today.replace(day=13).strftime(date_format)
-    twenty_fifth_this_month = today.replace(day=25).strftime(date_format)
+    thirteenth_this_month = today.replace(day=8).strftime(date_format)
+    quittance_date = today.strftime(date_format)
 
     # Define replacements
     replacements = {
@@ -80,7 +86,7 @@ def make_quittance(property_dict: dict) -> str:
         "{ex_charge}": str(hors_charge) + "€",
         "{charge}": str(charge) + "€",
         "{recu}": thirteenth_this_month,
-        "{signed}": twenty_fifth_this_month
+        "{signed}": quittance_date
     }
     output_doc = f'{property_name}_quittance_{today.strftime(date_format)}.docx'
     output_pdf = f'{property_name}_quittance_{today.strftime(date_format)}.pdf'
@@ -96,14 +102,44 @@ def make_quittance(property_dict: dict) -> str:
 
     return msg_body, output_pdf
 
-def send_email(sender_email, sender_password, receiver_email, subject, body, attachment_path):
+def get_gmail_credentials():
+    SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+    creds = None
+    
+    # Load credentials from token.pickle if it exists
+    if os.path.exists('config/token.pickle'):
+        with open('config/token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    
+    # If credentials don't exist or are invalid, get new ones
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # Load client secrets from the config directory
+            client_secret_file = next(f for f in os.listdir('config') if f.startswith('client_secret_'))
+            flow = InstalledAppFlow.from_client_secrets_file(
+                f'config/{client_secret_file}', SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Save the credentials for the next run
+        with open('config/token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
+    
+    return creds
+
+def send_email(sender_email, receiver_email, subject, body, attachment_path):
+    creds = get_gmail_credentials()
+    
+    # Create message container
     msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
+    msg['From'] = f'"{sender_email}" <{sender_email}>'
+    msg['To'] = f'"{receiver_email}" <{receiver_email}>'
     msg['Subject'] = subject
 
     msg.attach(MIMEText(body, 'plain'))
 
+    # Attach file
     with open(attachment_path, "rb") as attachment:
         part = MIMEBase("application", "octet-stream")
         part.set_payload(attachment.read())
@@ -115,32 +151,47 @@ def send_email(sender_email, sender_password, receiver_email, subject, body, att
     )
     msg.attach(part)
 
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.starttls()
-    server.login(sender_email, sender_password)
-    text = msg.as_string()
-    server.sendmail(sender_email, receiver_email, text)
-    server.quit()
+    # Create raw email
+    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+    
+    # Create Gmail API service
+    service = build('gmail', 'v1', credentials=creds)
+    
+    try:
+        # Send message
+        message = service.users().messages().send(
+            userId='me',
+            body={'raw': raw_message}
+        ).execute()
+        print(f"Message Id: {message['id']}")
+        return message
+    except Exception as e:
+        print(f"Error details: {str(e)}")
+        raise e
 
 
 if __name__ == "__main__":
     # Define your variables
     input_doc = "quittance_template.docx"
     ini_file = configparser.ConfigParser(interpolation=None)
-    ini_file.read(os.path.join(os.sep, os.getcwd(), 'config.ini'))
+    ini_file.read(os.path.join(os.sep, os.getcwd(), 'config', 'config.ini'))
     properties_list = ini_file.sections()
 
     # auth
     sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
-    sender_password = dict(ini_file.items(section="gmail"))["sender_password"]
     properties_list.pop(properties_list.index("gmail"))
 
     for property_name in properties_list:
         property_dict = dict(ini_file.items(section=property_name))
         msg_body, output_pdf = make_quittance(property_dict)
 
-        receiver_email = property_dict['tenant_email']
+        # Clean up the email address (remove any comments)
+        receiver_email = property_dict['tenant_email'].split('#')[0].strip()
         subject = f"Quittance de loyer {property_name}"
 
-        send_email(sender_email, sender_password, receiver_email, subject, msg_body, output_pdf)
-        print("Email sent successfully")
+        try:
+            send_email(sender_email, receiver_email, subject, msg_body, output_pdf)
+            print("Email sent successfully")
+        except Exception as e:
+            print(f"Error sending email: {e}")
+            print(f"Email not sent for {property_name}")
