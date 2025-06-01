@@ -1,5 +1,6 @@
 import configparser
 from os import PathLike
+import sys
 
 from docx import Document as DocxDocument
 from datetime import datetime, timedelta
@@ -57,7 +58,7 @@ def convert_to_pdf(docx_path, pdf_path):
     os.rename(os.path.splitext(docx_path)[0] + '.pdf', pdf_path)
 
 
-def make_quittance(property_dict: dict) -> str:
+def make_quittance(property_dict: dict, months_offset: int) -> str:
     address = dict(property_dict)["address"]
     tenantname = dict(property_dict)["tenantname"]
     landlordname = dict(property_dict)["landlordname"]
@@ -68,7 +69,6 @@ def make_quittance(property_dict: dict) -> str:
     date_format = "%d-%m-%Y"
 
     # Calculate dates
-    months_offset = 0
     today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
     first_day_this_month = today.replace(day=1).strftime(date_format)
     first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
@@ -181,9 +181,11 @@ if __name__ == "__main__":
     sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
     properties_list.pop(properties_list.index("gmail"))
 
+    months_offset = int(sys.argv[1])
+
     for property_name in properties_list:
         property_dict = dict(ini_file.items(section=property_name))
-        msg_body, output_pdf = make_quittance(property_dict)
+        msg_body, output_pdf = make_quittance(property_dict, months_offset=months_offset)
 
         # Clean up the email address (remove any comments)
         receiver_email = property_dict['tenant_email'].split('#')[0].strip()
