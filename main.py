@@ -55,6 +55,8 @@ def convert_to_pdf(docx_path, pdf_path):
     ], check=True)
 
     # Rename the output file to match the desired pdf_path
+    # if os.path.exists(pdf_path):
+    #     os.remove(pdf_path)
     os.rename(os.path.splitext(docx_path)[0] + '.pdf', pdf_path)
 
 
@@ -65,6 +67,7 @@ def make_quittance(property_dict: dict, months_offset: int) -> str:
     hors_charge = dict(property_dict)["hors_charge"]
     charge = dict(property_dict)["charge"]
     total_litteral = dict(property_dict)["total_litteral"]
+    day_of_month = int(dict(property_dict)["day_of_month"])
     rent_amt = int(hors_charge) + int(charge)
     date_format = "%d-%m-%Y"
 
@@ -72,7 +75,7 @@ def make_quittance(property_dict: dict, months_offset: int) -> str:
     today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
     first_day_this_month = today.replace(day=1).strftime(date_format)
     first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
-    thirteenth_this_month = today.replace(day=8).strftime(date_format)
+    payment_day = today.replace(day=day_of_month).strftime(date_format)
     quittance_date = today.strftime(date_format)
 
     # Define replacements
@@ -85,7 +88,7 @@ def make_quittance(property_dict: dict, months_offset: int) -> str:
         "{end}": first_day_next_month,
         "{ex_charge}": str(hors_charge) + "€",
         "{charge}": str(charge) + "€",
-        "{recu}": thirteenth_this_month,
+        "{recu}": payment_day,
         "{signed}": quittance_date
     }
     output_doc = f'{property_name}_quittance_{today.strftime(date_format)}.docx'
@@ -176,6 +179,7 @@ if __name__ == "__main__":
     ini_file = configparser.ConfigParser(interpolation=None)
     ini_file.read(os.path.join(os.sep, os.getcwd(), 'config', 'config.ini'))
     properties_list = ini_file.sections()
+    print(os.path.join(os.sep, os.getcwd(), 'config', 'config.ini'))
 
     # auth
     sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
@@ -188,12 +192,16 @@ if __name__ == "__main__":
         msg_body, output_pdf = make_quittance(property_dict, months_offset=months_offset)
 
         # Clean up the email address (remove any comments)
-        receiver_email = property_dict['tenant_email'].split('#')[0].strip()
+        receiver_email = property_dict['tenant_email'].split('#')[0].strip() if 'tenant_email' in property_dict else sender_email
+
         subject = f"Quittance de loyer {property_name}"
 
-        try:
-            send_email(sender_email, receiver_email, subject, msg_body, output_pdf)
-            print("Email sent successfully")
-        except Exception as e:
-            print(f"Error sending email: {e}")
-            print(f"Email not sent for {property_name}")
+        if dict(ini_file.items(section="gmail"))["enable_email"] == "true":
+            try:
+                send_email(sender_email, receiver_email, subject, msg_body, output_pdf)
+                print(f"Email sent successfully for {property_name}")
+            except Exception as e:
+                print(f"Error sending email: {e}")
+                print(f"Email not sent for {property_name}")
+        else:
+            print(f"Email disabled for {property_name}")
