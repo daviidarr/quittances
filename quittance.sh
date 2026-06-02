@@ -4,4 +4,4 @@
 source ~/quittances/venv/bin/activate
 
 # Run the Python app
-~/quittances/venv/bin/python3 ~/quittances/main.py 0
+~/quittances/venv/bin/python3 ~/quittances/main.py "$1"

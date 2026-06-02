@@ -60,7 +60,7 @@ def convert_to_pdf(docx_path, pdf_path):
     os.rename(os.path.splitext(docx_path)[0] + '.pdf', pdf_path)
 
 
-def make_quittance(property_dict: dict, months_offset: int) -> str:
+def make_quittance(property_dict: dict, target_date: datetime) -> str:
     address = dict(property_dict)["address"]
     tenantname = dict(property_dict)["tenantname"]
     landlordname = dict(property_dict)["landlordname"]
@@ -72,7 +72,7 @@ def make_quittance(property_dict: dict, months_offset: int) -> str:
     date_format = "%d-%m-%Y"
 
     # Calculate dates
-    today = datetime.today().replace(month=datetime.today().month - months_offset)  # Replace with today's date
+    today = target_date
     first_day_this_month = today.replace(day=1).strftime(date_format)
     first_day_next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1).strftime(date_format)
     payment_day = today.replace(day=day_of_month).strftime(date_format)
@@ -185,11 +185,26 @@ if __name__ == "__main__":
     sender_email = dict(ini_file.items(section="gmail"))["sender_email"]
     properties_list.pop(properties_list.index("gmail"))
 
-    months_offset = int(sys.argv[1])
+    MONTHS = {
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+        'january': 1, 'february': 2, 'march': 3, 'april': 4, 'june': 6,
+        'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+    }
+    arg = sys.argv[1].lower()
+    month_num = MONTHS.get(arg)
+    if month_num is None:
+        print(f"Error: unknown month '{arg}'. Use abbreviations like jan, feb, mar...")
+        sys.exit(1)
+    today_real = datetime.today()
+    target_year = today_real.year if month_num <= today_real.month else today_real.year - 1
+    import calendar
+    max_day = calendar.monthrange(target_year, month_num)[1]
+    target_date = datetime(target_year, month_num, min(today_real.day, max_day))
 
     for property_name in properties_list:
         property_dict = dict(ini_file.items(section=property_name))
-        msg_body, output_pdf = make_quittance(property_dict, months_offset=months_offset)
+        msg_body, output_pdf = make_quittance(property_dict, target_date=target_date)
 
         # Clean up the email address (remove any comments)
         receiver_email = property_dict['tenant_email'].split('#')[0].strip() if 'tenant_email' in property_dict else sender_email
